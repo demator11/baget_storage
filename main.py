@@ -1,0 +1,3 @@
+from baget_storage.app import create_app
+
+app = create_app()
