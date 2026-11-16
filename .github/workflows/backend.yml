@@ -2,7 +2,7 @@ name: Backend
 
 on:
   push:
-    branches: ["backend/**"]
+    branches: ["master", "backend/**"]
   pull_request:
 
 permissions:
