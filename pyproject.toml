@@ -33,6 +33,9 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/baget_storage"]
 
+[tool.hatch.build.targets.sdist]
+include = ["src", "alembic", "alembic.ini", "pyproject.toml", "uv.lock"]
+
 [tool.ruff]
 target-version = "py313"
 line-length = 100
