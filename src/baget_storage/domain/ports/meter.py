@@ -12,15 +12,21 @@ from baget_storage.schemas.meter import (
     MeterDTO,
     MeterFilters,
     MeterPage,
+    MeterStatsDTO,
     ReadingDTO,
     ReadingFilters,
     ReadingPage,
+    ReadingPhotoDTO,
     ReviewReading,
 )
 
 
 class MeterClock(Protocol):
     def today(self) -> date: ...
+
+
+class MeterPhotoProcessor(Protocol):
+    async def process(self, content: bytes) -> ReadingPhotoDTO: ...
 
 
 class MeterRepository(Protocol):
@@ -42,6 +48,10 @@ class MeterRepository(Protocol):
 
     async def get_reading(self, reading_id: UUID) -> ReadingDTO | None: ...
 
+    async def save_photo(self, reading_id: UUID, photo: ReadingPhotoDTO) -> ReadingDTO: ...
+
+    async def get_photo(self, reading_id: UUID) -> ReadingPhotoDTO | None: ...
+
     async def create_reading(self, data: CreateReading) -> ReadingDTO: ...
 
     async def resubmit_reading(self, reading_id: UUID, value: Decimal) -> ReadingDTO: ...
@@ -55,8 +65,16 @@ class MeterRepository(Protocol):
     ) -> ReadingDTO: ...
 
     async def list_readings(
-        self, meter_id: UUID, filters: ReadingFilters, tenant_id: UUID | None = None
+        self, meter_id: UUID | None, filters: ReadingFilters, tenant_id: UUID | None = None
     ) -> ReadingPage: ...
+
+    async def stats(
+        self, filters: MeterFilters, tenant_id: UUID | None, today: date
+    ) -> MeterStatsDTO: ...
+
+    async def periods(
+        self, tenant_id: UUID | None, today: date, limit: int, offset: int
+    ) -> tuple[list[date], int]: ...
 
 
 class MeterUnitOfWork(Protocol):

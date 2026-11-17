@@ -39,7 +39,7 @@ pytestmark = pytest.mark.integration
 
 class FixedMeterClock:
     def today(self) -> date:
-        return date(2026, 11, 17)
+        return date(2026, 11, 3)
 
 
 @pytest.fixture
@@ -133,11 +133,18 @@ async def test_meter_reading_workflow_and_queries(session_factory, meter_context
     latest = await meters.execute(tenant, MeterFilters())
     assert latest.total == 1
     assert latest.items[0].latest_reading_id == november.id
+    assert latest.items[0].previous_accepted_value == Decimal("125")
     earlier = await meters.execute(
         manager, MeterFilters(period=date(2026, 10, 1), status=ReadingStatus.ACCEPTED)
     )
     assert earlier.total == 1
     assert earlier.items[0].latest_reading_id == october.id
+    assert earlier.items[0].previous_accepted_value == Decimal("100")
+    async with MeterSqlAlchemyUnitOfWork(session_factory) as details_uow:
+        details = await details_uow.meters.get_by_id(meter.id)
+    assert details.room_name == "B2"
+    assert details.latest_reading_id == november.id
+    assert details.previous_accepted_value == Decimal("125")
     history = GetReadingsUseCase(MeterSqlAlchemyUnitOfWork(session_factory), FixedMeterClock())
     first = await history.execute(tenant, meter.id, ReadingFilters(limit=1))
     second = await history.execute(tenant, meter.id, ReadingFilters(limit=1, offset=1))
@@ -145,7 +152,11 @@ async def test_meter_reading_workflow_and_queries(session_factory, meter_context
     assert first.items[0].id == november.id
     assert second.items[0].id == october.id
     async with session_factory() as session:
-        notifications = list(await session.scalars(select(NotificationOrm)))
+        notifications = list(
+            await session.scalars(
+                select(NotificationOrm).where(NotificationOrm.user_id == tenant.id)
+            )
+        )
     assert len(notifications) == 2
     assert all(row.user_id == tenant.id and row.category == "meters" for row in notifications)
 
@@ -218,7 +229,11 @@ async def test_notification_failure_rolls_back_meter_review(
         )
     async with session_factory() as session:
         stored = await session.get(MeterReadingOrm, reading.id)
-        notifications = await session.scalar(select(func.count()).select_from(NotificationOrm))
+        notifications = await session.scalar(
+            select(func.count())
+            .select_from(NotificationOrm)
+            .where(NotificationOrm.user_id == tenant.id)
+        )
     assert stored.status == "pending"
     assert stored.reviewed_by is None
     assert stored.reviewed_at is None
@@ -312,7 +327,11 @@ async def test_concurrent_corrections_accept_reading_only_once(
     assert sum(not isinstance(result, BaseException) for result in results) == 1
     async with session_factory() as session:
         stored = await session.get(MeterReadingOrm, reading.id)
-        count = await session.scalar(select(func.count()).select_from(NotificationOrm))
+        count = await session.scalar(
+            select(func.count())
+            .select_from(NotificationOrm)
+            .where(NotificationOrm.user_id == tenant.id)
+        )
     assert stored.status == "accepted"
     assert stored.value == Decimal("125")
     assert stored.correction_reason == "Verified"

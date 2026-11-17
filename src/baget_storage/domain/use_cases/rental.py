@@ -19,11 +19,13 @@ from baget_storage.domain.ports.rental import RentalUnitOfWork
 from baget_storage.schemas.rental import (
     CreateLease,
     CreateRoom,
+    ExpiringLeaseFilter,
     LeaseDTO,
     LeaseFilter,
     RentalPage,
     RoomDTO,
     RoomFilter,
+    RoomStatsDTO,
     UpdateRoom,
 )
 
@@ -152,3 +154,35 @@ class TerminateLeaseUseCase:
                 raise EntityNotFound()
             await uow.commit()
             return result
+
+
+class GetLeaseUseCase:
+    def __init__(self, uow: RentalUnitOfWork) -> None:
+        self._uow = uow
+
+    async def execute(self, actor: Actor, lease_id: UUID) -> LeaseDTO:
+        async with self._uow as uow:
+            lease = await uow.leases.get_by_id(lease_id)
+            if lease is None or (actor.role == Role.TENANT and lease.tenant_id != actor.id):
+                raise EntityNotFound("Lease not found.")
+            return lease
+
+
+class GetRoomStatsUseCase:
+    def __init__(self, uow: RentalUnitOfWork) -> None:
+        self._uow = uow
+
+    async def execute(self, actor: Actor) -> RoomStatsDTO:
+        async with self._uow as uow:
+            return await uow.rooms.stats(actor.id if actor.role == Role.TENANT else None)
+
+
+class GetExpiringLeasesUseCase:
+    def __init__(self, uow: RentalUnitOfWork) -> None:
+        self._uow = uow
+
+    async def execute(self, actor: Actor, filters: ExpiringLeaseFilter) -> RentalPage[LeaseDTO]:
+        async with self._uow as uow:
+            return await uow.leases.expiring(
+                filters, actor.id if actor.role == Role.TENANT else None
+            )

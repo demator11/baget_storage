@@ -35,10 +35,19 @@ class UpdateProfileRequest(BaseModel):
     notify_payments: bool | None = None
     notify_meters: bool | None = None
     notify_documents: bool | None = None
+    notify_tickets: bool | None = None
+    notify_leases: bool | None = None
 
     @model_validator(mode="after")
     def validate_full_name(self) -> "UpdateProfileRequest":
-        required = {"full_name", "notify_payments", "notify_meters", "notify_documents"}
+        required = {
+            "full_name",
+            "notify_payments",
+            "notify_meters",
+            "notify_documents",
+            "notify_tickets",
+            "notify_leases",
+        }
         if any(getattr(self, field) is None for field in required & self.model_fields_set):
             raise ValueError("Required profile fields cannot be null")
         return self
@@ -62,6 +71,10 @@ class UserResponse(BaseModel):
     notify_payments: bool
     notify_meters: bool
     notify_documents: bool
+    notify_tickets: bool
+    notify_leases: bool
+    email_verified_at: datetime | None
+    accessible_buildings: list[str]
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -71,6 +84,10 @@ class AccessTokenResponse(BaseModel):
     access_token: str
     token_type: Literal["bearer"]
     expires_in: int
+    refresh_token: str
+    refresh_expires_in: int
+    session_id: UUID
+    user: UserResponse
 
 
 class UserPageResponse(BaseModel):
@@ -78,3 +95,33 @@ class UserPageResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class RefreshRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    refresh_token: str = Field(min_length=32, max_length=256, repr=False)
+
+
+class EmailTokenRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    token: str = Field(min_length=32, max_length=256, repr=False)
+
+
+class PasswordResetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: EmailStr
+
+
+class CompletePasswordResetRequest(EmailTokenRequest):
+    new_password: str = Field(min_length=12, max_length=128, repr=False)
+
+
+class SessionResponse(BaseModel):
+    id: UUID
+    expires_at: datetime
+    last_used_at: datetime
+    created_at: datetime
+    is_current: bool

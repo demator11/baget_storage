@@ -22,7 +22,7 @@ from baget_storage.infrastructure.postgres.models.office import DocumentOrm, Inv
 from baget_storage.infrastructure.postgres.models.rental import LeaseOrm, RoomOrm
 from baget_storage.infrastructure.postgres.models.user import UserOrm
 from baget_storage.infrastructure.postgres.office_uow import OfficeSqlAlchemyUnitOfWork
-from baget_storage.infrastructure.security import JwtTokenService
+from baget_storage.infrastructure.security import Argon2PasswordHasher
 from baget_storage.schemas.office import (
     AttachInvoiceDocument,
     CreateInvoice,
@@ -33,6 +33,7 @@ from baget_storage.schemas.office import (
 
 pytestmark = pytest.mark.integration
 PDF = b"%PDF-1.4 invoice download test"
+PASSWORD = "invoice-document-test-password"
 
 
 @dataclass
@@ -68,6 +69,7 @@ async def invoice_documents(
     other = Actor(id=uuid4(), role=Role.TENANT)
     room_ids = [uuid4(), uuid4()]
     lease_ids = [uuid4(), uuid4()]
+    password_hash = await Argon2PasswordHasher().hash(PASSWORD)
     async with session_factory.begin() as session:
         for actor, email in (
             (manager, "invoice-manager@example.com"),
@@ -80,7 +82,7 @@ async def invoice_documents(
                     email=email,
                     full_name=email,
                     role=actor.role,
-                    password_hash="unused-in-invoice-document-tests",
+                    password_hash=password_hash,
                 )
             )
         for index, room_id in enumerate(room_ids):
@@ -225,17 +227,23 @@ async def test_invoice_pdf_api_checks_ownership_and_returns_safe_download(
 ) -> None:
     context = invoice_documents
     secret = "invoice-document-api-test-secret-value"
-    tokens = JwtTokenService(secret, 60)
-    headers = {
-        actor.id: {"Authorization": f"Bearer {tokens.issue(actor.id, 0).access_token}"}
-        for actor in (context.manager, context.tenant, context.other)
-    }
     app = create_app(
         Settings(database_url=test_database_url, jwt_secret=secret, environment="test")
     )
     invoice_path = f"/api/v1/invoices/{context.invoice.id}"
     async with app.router.lifespan_context(app):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            headers = {}
+            for actor, email in (
+                (context.manager, "invoice-manager@example.com"),
+                (context.tenant, "invoice-tenant@example.com"),
+                (context.other, "invoice-other@example.com"),
+            ):
+                login = await client.post(
+                    "/api/v1/auth/login", json={"email": email, "password": PASSWORD}
+                )
+                assert login.status_code == 200, login.text
+                headers[actor.id] = {"Authorization": f"Bearer {login.json()['access_token']}"}
             no_document = await client.get(
                 f"{invoice_path}/download", headers=headers[context.tenant.id]
             )

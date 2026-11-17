@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import UTC, datetime
 from types import TracebackType
 from typing import Self
@@ -22,6 +23,27 @@ from baget_storage.schemas.user import (
 class FakePasswords:
     async def hash(self, password: str) -> str:
         return f"hashed:{password}"
+
+
+class FakeClock:
+    def now(self) -> datetime:
+        return datetime.now(UTC)
+
+
+class FakeSessions:
+    def __init__(self) -> None:
+        self.active: dict[UUID, bool] = {}
+
+    async def revoke_all(self, user_id: UUID) -> None:
+        self.active[user_id] = False
+
+
+class FakeActions:
+    def __init__(self) -> None:
+        self.pending: set[UUID] = set()
+
+    async def invalidate(self, user_id: UUID, purpose: str, now: datetime) -> None:
+        self.pending.discard(user_id)
 
 
 class FakeUsers:
@@ -63,11 +85,14 @@ class FakeUsers:
 class FakeBootstrapUow:
     def __init__(self) -> None:
         self.users = FakeUsers()
+        self.sessions = FakeSessions()
+        self.actions = FakeActions()
         self.committed = False
         self.fail_commit = False
 
     async def __aenter__(self) -> Self:
         self.snapshot = {key: value.model_copy(deep=True) for key, value in self.users.rows.items()}
+        self.security_snapshot = deepcopy((self.sessions, self.actions))
         self.committed = False
         return self
 
@@ -79,6 +104,7 @@ class FakeBootstrapUow:
     ) -> None:
         if not self.committed or exc is not None:
             self.users.rows = self.snapshot
+            self.sessions, self.actions = self.security_snapshot
 
     async def commit(self) -> None:
         if self.fail_commit:
@@ -128,22 +154,24 @@ async def test_password_reset_replaces_hash_and_revokes_old_tokens(
     uow: FakeBootstrapUow, manager_data: CreateUser
 ) -> None:
     user = await CreateManagerUseCase(uow, FakePasswords()).execute(manager_data)
-    await ResetPasswordUseCase(uow, FakePasswords()).execute(
+    uow.sessions.active[user.id] = True
+    uow.actions.pending.add(user.id)
+    await ResetPasswordUseCase(uow, FakePasswords(), FakeClock()).execute(
         ResetPassword(email="Manager@Example.com", password="replacement-password-456")
     )
     assert uow.users.rows[user.id].password_hash == "hashed:replacement-password-456"
     assert uow.users.rows[user.id].token_version == 1
     with pytest.raises(AuthenticationRequired):
-        await AuthenticateUserUseCase(uow).execute(TokenClaims(user_id=user.id, token_version=0))
-    actor = await AuthenticateUserUseCase(uow).execute(
-        TokenClaims(user_id=user.id, token_version=1)
-    )
-    assert actor.id == user.id
+        await AuthenticateUserUseCase(uow, FakeClock()).execute(
+            TokenClaims(user_id=user.id, token_version=0)
+        )
+    assert not uow.sessions.active[user.id]
+    assert user.id not in uow.actions.pending
 
 
 async def test_reset_missing_account_does_not_create_one(uow: FakeBootstrapUow) -> None:
     with pytest.raises(EntityNotFound):
-        await ResetPasswordUseCase(uow, FakePasswords()).execute(
+        await ResetPasswordUseCase(uow, FakePasswords(), FakeClock()).execute(
             ResetPassword(email="missing@example.com", password="replacement-password-456")
         )
     assert not uow.users.rows
@@ -157,7 +185,7 @@ async def test_concurrent_change_during_reset_is_reported_without_overwrite(
     original = uow.users.rows[user.id]
     uow.users.reject_change = True
     with pytest.raises(Conflict):
-        await ResetPasswordUseCase(uow, FakePasswords()).execute(
+        await ResetPasswordUseCase(uow, FakePasswords(), FakeClock()).execute(
             ResetPassword(email=user.email, password="replacement-password-456")
         )
     assert uow.users.rows[user.id] == original
@@ -170,7 +198,7 @@ async def test_failed_reset_commit_preserves_password_and_token_version(
     original = uow.users.rows[user.id]
     uow.fail_commit = True
     with pytest.raises(RuntimeError, match="Storage unavailable"):
-        await ResetPasswordUseCase(uow, FakePasswords()).execute(
+        await ResetPasswordUseCase(uow, FakePasswords(), FakeClock()).execute(
             ResetPassword(email=user.email, password="replacement-password-456")
         )
     assert uow.users.rows[user.id] == original

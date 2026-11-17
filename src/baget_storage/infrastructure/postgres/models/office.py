@@ -7,6 +7,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Identity,
     Integer,
     LargeBinary,
     Numeric,
@@ -27,6 +28,7 @@ class TicketOrm(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint("length(trim(description)) > 0", name="description_not_blank"),
     )
 
+    public_number: Mapped[int] = mapped_column(Integer, Identity(), unique=True)
     room_id: Mapped[UUID] = mapped_column(ForeignKey("rooms.id", ondelete="RESTRICT"), index=True)
     created_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), index=True
@@ -104,7 +106,14 @@ class NotificationOrm(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "notifications"
     __table_args__ = (
         CheckConstraint(
-            "category IN ('system', 'payments', 'documents', 'meters')", name="valid_category"
+            "category IN ('system', 'payments', 'documents', 'meters', 'tickets', 'leases')",
+            name="valid_event_category",
+        ),
+        CheckConstraint(
+            "(resource_type IS NULL AND resource_id IS NULL) OR "
+            "(resource_type IS NOT NULL AND resource_id IS NOT NULL AND "
+            "resource_type IN ('invoice', 'document', 'ticket', 'lease', 'meter', 'reading'))",
+            name="valid_resource",
         ),
     )
 
@@ -112,5 +121,8 @@ class NotificationOrm(UUIDPrimaryKeyMixin, Base):
     title: Mapped[str] = mapped_column(String(200))
     body: Mapped[str] = mapped_column(String(2000))
     category: Mapped[str] = mapped_column(String(16))
+    resource_type: Mapped[str | None] = mapped_column(String(16))
+    resource_id: Mapped[UUID | None]
+    deduplication_key: Mapped[str | None] = mapped_column(String(200), unique=True)
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

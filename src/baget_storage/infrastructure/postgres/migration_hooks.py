@@ -39,6 +39,22 @@ def include_extensions(context, revision, directives) -> None:
             script.upgrade_ops.ops.insert(
                 0, ops.ExecuteSQLOp("CREATE EXTENSION IF NOT EXISTS btree_gist")
             )
+        for operation in script.downgrade_ops.ops:
+            if not isinstance(operation, ops.ModifyTableOps):
+                continue
+            for index, change in enumerate(operation.ops):
+                if (
+                    isinstance(change, ops.CreateCheckConstraintOp)
+                    and str(change.constraint_name) == "ck_notifications_valid_category"
+                ):
+                    operation.ops.insert(
+                        index,
+                        ops.ExecuteSQLOp(
+                            "UPDATE notifications SET category = 'system' "
+                            "WHERE category IN ('tickets', 'leases')"
+                        ),
+                    )
+                    break
 
 
 @write_hooks.register("format_revision")

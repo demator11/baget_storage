@@ -76,6 +76,12 @@ class FakeNotifications:
     async def preferences(self, user_id):
         return self.settings
 
+    async def verified_email(self, user_id):
+        return None
+
+    async def manager_ids(self, after=None, limit=100):
+        return []
+
     async def create(self, data):
         if self.fail:
             raise RuntimeError("Notification storage unavailable")
@@ -255,7 +261,7 @@ async def test_disabled_payment_notifications_do_not_block_payment(context):
     assert result.amount == Decimal("40.00")
     assert context.uow.billing.invoice.paid_amount == Decimal("40.00")
     assert context.uow.committed
-    assert not context.uow.notifications.items
+    assert len(context.uow.notifications.items) == 1
 
 
 async def test_disabled_document_notifications_do_not_block_upload(context):
@@ -271,23 +277,22 @@ async def test_disabled_document_notifications_do_not_block_upload(context):
     )
     assert result.id in context.uow.documents.items
     assert context.uow.committed
-    assert not context.uow.notifications.items
+    assert len(context.uow.notifications.items) == 1
 
 
 @pytest.mark.parametrize(
     "category",
     [NotificationCategory.PAYMENTS, NotificationCategory.DOCUMENTS, NotificationCategory.METERS],
 )
-async def test_explicit_notification_cannot_bypass_disabled_category(context, category):
+async def test_explicit_in_app_notification_ignores_disabled_email_category(context, category):
     context.uow.notifications.settings = NotificationPreferences(False, False, False)
-    with pytest.raises(BusinessRuleViolation):
-        await CreateNotificationUseCase(context.uow).execute(
-            context.manager,
-            CreateNotification(
-                user_id=context.tenant.id, title="Title", body="Body", category=category
-            ),
-        )
-    assert not context.uow.notifications.items
+    result = await CreateNotificationUseCase(context.uow).execute(
+        context.manager,
+        CreateNotification(
+            user_id=context.tenant.id, title="Title", body="Body", category=category
+        ),
+    )
+    assert context.uow.notifications.items == [result]
 
 
 async def test_system_notifications_always_delivered(context):

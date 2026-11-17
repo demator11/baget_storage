@@ -12,12 +12,14 @@ SECRET = "test-only-secret-" * 4
 
 def test_token_round_trip() -> None:
     user_id = uuid4()
+    session_id = uuid4()
     tokens = JwtTokenService(SECRET, 60)
-    token = tokens.issue(user_id, 4)
+    token = tokens.issue(user_id, 4, session_id)
     claims = tokens.decode(token.access_token)
 
     assert claims.user_id == user_id
     assert claims.token_version == 4
+    assert claims.session_id == session_id
     assert token.expires_in == 3600
 
 
@@ -33,6 +35,7 @@ def test_token_rejects_invalid_claims(mutation: str) -> None:
     claims = {
         "sub": str(uuid4()),
         "ver": 0,
+        "sid": str(uuid4()),
         "iat": now,
         "exp": now + timedelta(minutes=60),
         "iss": "baget-storage",
@@ -64,3 +67,13 @@ async def test_argon_hash_is_salted_and_password_verification_is_correct() -> No
     assert await passwords.verify("strong-password-123", first)
     assert not await passwords.verify("wrong-password", first)
     assert not await passwords.verify("strong-password-123", "malformed")
+
+
+def test_opaque_tokens_are_unique_and_only_digest_is_persistable() -> None:
+    tokens = JwtTokenService(SECRET, 60)
+    first, second = tokens.new_opaque(), tokens.new_opaque()
+    assert len(first) >= 64
+    assert first != second
+    assert len(tokens.hash_opaque(first)) == 64
+    assert tokens.hash_opaque(first) != first
+    assert tokens.hash_opaque(first) != tokens.hash_opaque(second)

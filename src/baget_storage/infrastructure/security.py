@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import secrets
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -43,12 +45,21 @@ class JwtTokenService:
         self._issuer = issuer
         self._audience = audience
 
-    def issue(self, user_id: UUID, token_version: int) -> AccessToken:
+    def new_opaque(self) -> str:
+        return secrets.token_urlsafe(48)
+
+    def hash_opaque(self, token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    def issue(
+        self, user_id: UUID, token_version: int, session_id: UUID | None = None
+    ) -> AccessToken:
         now = datetime.now(UTC)
         token = jwt.encode(
             {
                 "sub": str(user_id),
                 "ver": token_version,
+                "sid": str(session_id or uuid4()),
                 "iat": now,
                 "exp": now + timedelta(minutes=self._expires_minutes),
                 "iss": self._issuer,
@@ -68,8 +79,15 @@ class JwtTokenService:
                 algorithms=["HS256"],
                 issuer=self._issuer,
                 audience=self._audience,
-                options={"require": ["sub", "ver", "iat", "exp", "iss", "aud", "jti"]},
+                options={"require": ["sub", "ver", "sid", "iat", "exp", "iss", "aud", "jti"]},
             )
-            return TokenClaims(user_id=claims["sub"], token_version=claims["ver"])
+            return TokenClaims(
+                user_id=claims["sub"], token_version=claims["ver"], session_id=claims["sid"]
+            )
         except (InvalidTokenError, ValidationError, KeyError, TypeError, ValueError) as error:
             raise AuthenticationRequired() from error
+
+
+class UtcAuthClock:
+    def now(self) -> datetime:
+        return datetime.now(UTC)

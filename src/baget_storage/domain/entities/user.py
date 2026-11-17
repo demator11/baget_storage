@@ -14,6 +14,7 @@ class Role(StrEnum):
 class Actor:
     id: UUID
     role: Role
+    session_id: UUID | None = None
 
     def require_manager(self) -> None:
         if self.role != Role.MANAGER:

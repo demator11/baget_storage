@@ -46,7 +46,7 @@ PERIOD = date(2026, 11, 1)
 
 class FakeClock:
     def today(self) -> date:
-        return NOW.date()
+        return date(2026, 11, 3)
 
 
 class FakeMeterRepository:
@@ -189,6 +189,12 @@ class FakeMeterNotifications:
         self.fail_create = False
         self.settings = NotificationPreferences()
 
+    async def manager_ids(self, *, after=None, limit=100) -> list[UUID]:
+        return []
+
+    async def verified_email(self, user_id: UUID) -> str | None:
+        return None
+
     async def preferences(self, user_id: UUID) -> NotificationPreferences:
         return self.settings
 
@@ -277,6 +283,32 @@ async def test_submit_review_and_next_month(meter_setup, tenant, manager) -> Non
     assert len(uow.meters.readings) == 2
 
 
+async def test_closed_period_rejects_new_reading_but_allows_requested_correction(
+    meter_setup, tenant, manager
+) -> None:
+    uow, meter = meter_setup
+    original = await SubmitReadingUseCase(uow, FakeClock()).execute(
+        tenant, meter.id, SubmitReading(period=date(2026, 10, 1), value="120")
+    )
+    await ReviewReadingUseCase(uow).execute(
+        manager, original.id, ReviewReading(status=ReadingStatus.REJECTED, reason="Check display")
+    )
+    late_clock = FakeClock()
+    late_clock.today = lambda: date(2026, 12, 17)
+    corrected = await SubmitReadingUseCase(uow, late_clock).execute(
+        tenant, meter.id, SubmitReading(period=date(2026, 10, 1), value="125")
+    )
+    assert corrected.id == original.id
+    await ReviewReadingUseCase(uow).execute(
+        manager, original.id, ReviewReading(status=ReadingStatus.ACCEPTED)
+    )
+    with pytest.raises(BusinessRuleViolation, match="window"):
+        await SubmitReadingUseCase(uow, late_clock).execute(
+            tenant, meter.id, SubmitReading(period=date(2026, 11, 1), value="130")
+        )
+    assert len(uow.meters.readings) == 1
+
+
 async def test_disabled_meter_notification_does_not_block_review(
     meter_setup, tenant, manager
 ) -> None:
@@ -291,7 +323,7 @@ async def test_disabled_meter_notification_does_not_block_review(
     assert result.status == ReadingStatus.ACCEPTED
     assert uow.meters.readings[reading.id].status == ReadingStatus.ACCEPTED
     assert uow.committed
-    assert not uow.notifications.items
+    assert len(uow.notifications.items) == 1
 
 
 async def test_tenant_cannot_create_meter(meter_setup, tenant) -> None:

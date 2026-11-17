@@ -1,11 +1,13 @@
 from baget_storage.schemas.rental import (
     CreateLease,
     CreateRoom,
+    ExpiringLeaseFilter,
     LeaseDTO,
     LeaseFilter,
     RentalPage,
     RoomDTO,
     RoomFilter,
+    RoomStatsDTO,
     UpdateRoom,
 )
 
@@ -43,4 +45,12 @@ class RoomPageResponse(RentalPage[RoomResponse]):
 
 
 class LeasePageResponse(RentalPage[LeaseResponse]):
+    pass
+
+
+class ExpiringLeaseQuery(ExpiringLeaseFilter):
+    pass
+
+
+class RoomStatsResponse(RoomStatsDTO):
     pass

@@ -84,6 +84,9 @@ class FakeInvoiceNotifications:
     async def preferences(self, user_id: UUID) -> NotificationPreferences:
         return NotificationPreferences()
 
+    async def verified_email(self, user_id: UUID) -> str | None:
+        return None
+
     async def create(self, data: CreateNotification) -> NotificationDTO:
         result = NotificationDTO(**data.model_dump(), id=uuid4(), read_at=None, created_at=NOW)
         self.items.append(result)

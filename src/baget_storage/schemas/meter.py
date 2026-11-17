@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -40,13 +40,19 @@ class MeterDTO(BaseModel):
     latest_reading_value: Decimal | None = None
     latest_reading_period: date | None = None
     latest_reading_status: ReadingStatus | None = None
+    latest_reading_at: datetime | None = None
+    latest_reading_has_photo: bool = False
+    previous_accepted_value: Decimal | None = None
+    room_name: str | None = None
+    building: str | None = None
+    floor: int | None = None
 
 
 class MeterFilters(MeterInput):
     room_id: UUID | None = None
     kind: MeterKind | None = None
     period: date | None = None
-    status: ReadingStatus | None = None
+    status: ReadingStatus | Literal["missing"] | None = None
     limit: int = Field(default=25, ge=1, le=100)
     offset: int = Field(default=0, ge=0)
 
@@ -88,6 +94,13 @@ class ReadingDTO(BaseModel):
     created_at: datetime
     updated_at: datetime
     correction_reason: str | None = None
+    has_photo: bool = False
+    room_id: UUID | None = None
+    room_name: str | None = None
+    kind: MeterKind | None = None
+    serial_number: str | None = None
+    unit: str | None = None
+    submitted_by_name: str | None = None
 
 
 class ReviewReading(MeterInput):
@@ -101,6 +114,9 @@ class CorrectReading(MeterInput):
 
 
 class ReadingFilters(MeterInput):
+    meter_id: UUID | None = None
+    room_id: UUID | None = None
+    kind: MeterKind | None = None
     status: ReadingStatus | None = None
     period: date | None = None
     limit: int = Field(default=25, ge=1, le=100)
@@ -112,3 +128,36 @@ class ReadingPage(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class MeterStatsDTO(BaseModel):
+    period: date
+    total: int
+    pending: int
+    accepted: int
+    rejected: int
+    missing: int
+
+
+class ReadingPeriodDTO(BaseModel):
+    period: date
+    opens_on: date
+    closes_on: date
+    is_open: bool
+
+
+class ReadingPeriodFilter(MeterInput):
+    limit: int = Field(default=24, ge=1, le=100)
+    offset: int = Field(default=0, ge=0)
+
+
+class ReadingPeriodPage(BaseModel):
+    items: list[ReadingPeriodDTO]
+    total: int
+    limit: int
+    offset: int
+
+
+class ReadingPhotoDTO(BaseModel):
+    content: bytes = Field(repr=False)
+    content_type: str = "image/jpeg"

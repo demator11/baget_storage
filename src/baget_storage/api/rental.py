@@ -8,7 +8,10 @@ from baget_storage.api.auth import CurrentActor
 from baget_storage.domain.use_cases.rental import (
     CreateLeaseUseCase,
     CreateRoomUseCase,
+    GetExpiringLeasesUseCase,
     GetLeasesUseCase,
+    GetLeaseUseCase,
+    GetRoomStatsUseCase,
     GetRoomsUseCase,
     GetRoomUseCase,
     TerminateLeaseUseCase,
@@ -17,23 +20,43 @@ from baget_storage.domain.use_cases.rental import (
 from baget_storage.schemas.api.rental import (
     CreateLeaseRequest,
     CreateRoomRequest,
+    ExpiringLeaseQuery,
     LeaseListQuery,
     LeasePageResponse,
     LeaseResponse,
     RoomListQuery,
     RoomPageResponse,
     RoomResponse,
+    RoomStatsResponse,
     UpdateRoomRequest,
 )
 from baget_storage.schemas.rental import (
     CreateLease,
     CreateRoom,
+    ExpiringLeaseFilter,
     LeaseFilter,
     RoomFilter,
     UpdateRoom,
 )
 
 router = APIRouter(tags=["Rental"], route_class=DishkaRoute)
+
+
+@router.get("/rooms/stats", response_model=RoomStatsResponse)
+async def room_stats(
+    actor: CurrentActor, use_case: FromDishka[GetRoomStatsUseCase]
+) -> RoomStatsResponse:
+    return RoomStatsResponse.model_validate(await use_case.execute(actor))
+
+
+@router.get("/leases/expiring", response_model=LeasePageResponse)
+async def expiring_leases(
+    actor: CurrentActor,
+    query: Annotated[ExpiringLeaseQuery, Query()],
+    use_case: FromDishka[GetExpiringLeasesUseCase],
+) -> LeasePageResponse:
+    result = await use_case.execute(actor, ExpiringLeaseFilter(**query.model_dump()))
+    return LeasePageResponse.model_validate(result)
 
 
 @router.get("/rooms", response_model=RoomPageResponse)
@@ -101,5 +124,12 @@ async def terminate_lease(
     actor: CurrentActor,
     lease_id: UUID,
     use_case: FromDishka[TerminateLeaseUseCase],
+) -> LeaseResponse:
+    return LeaseResponse.model_validate(await use_case.execute(actor, lease_id))
+
+
+@router.get("/leases/{lease_id}", response_model=LeaseResponse)
+async def get_lease(
+    actor: CurrentActor, lease_id: UUID, use_case: FromDishka[GetLeaseUseCase]
 ) -> LeaseResponse:
     return LeaseResponse.model_validate(await use_case.execute(actor, lease_id))

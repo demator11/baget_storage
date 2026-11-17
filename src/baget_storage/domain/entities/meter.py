@@ -20,9 +20,13 @@ class ReadingStatus(StrEnum):
     REJECTED = "rejected"
 
 
+def validate_reading_period(period: date | None) -> None:
+    if period is not None and (period.day != 1 or period.year >= 9999):
+        raise BusinessRuleViolation("Reading period must be the first day of a month before 9999.")
+
+
 def validate_reading(period: date, value: Decimal, previous: Decimal, today: date) -> None:
-    if period.day != 1:
-        raise BusinessRuleViolation("Reading period must be the first day of a month.")
+    validate_reading_period(period)
     if period > today.replace(day=1):
         raise BusinessRuleViolation("Readings cannot be submitted for a future month.")
     if not value.is_finite() or value < previous:

@@ -5,6 +5,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from baget_storage.core.exceptions import Conflict
+from baget_storage.infrastructure.postgres.repository.auth import (
+    SqlAlchemyEmailActionRepository,
+    SqlAlchemySessionRepository,
+)
+from baget_storage.infrastructure.postgres.repository.email import SqlAlchemyEmailOutbox
 from baget_storage.infrastructure.postgres.repository.user import SqlAlchemyUserRepository
 
 
@@ -13,12 +18,18 @@ class AuthSqlAlchemyUnitOfWork:
         self._session_factory = session_factory
         self._session: AsyncSession | None = None
         self.users: SqlAlchemyUserRepository
+        self.sessions: SqlAlchemySessionRepository
+        self.actions: SqlAlchemyEmailActionRepository
+        self.outbox: SqlAlchemyEmailOutbox
 
     async def __aenter__(self) -> Self:
         if self._session is not None:
             raise RuntimeError("Unit of work is already active")
         self._session = self._session_factory()
         self.users = SqlAlchemyUserRepository(self._session)
+        self.sessions = SqlAlchemySessionRepository(self._session)
+        self.actions = SqlAlchemyEmailActionRepository(self._session)
+        self.outbox = SqlAlchemyEmailOutbox(self._session)
         return self
 
     async def __aexit__(

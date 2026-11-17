@@ -5,21 +5,27 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from baget_storage.domain.entities.office import NotificationCategory
 from baget_storage.schemas.office import (
+    BillingSummaryDTO,
     CreateInvoice,
-    CreateNotification,
     CreateTicket,
     DashboardDTO,
     DocumentDTO,
     DocumentFilter,
+    DocumentStatsDTO,
     InvoiceDTO,
     InvoiceFilter,
     ListFilter,
+    NotificationContent,
     NotificationDTO,
     PaymentDTO,
+    PaymentFilter,
     RecordPayment,
     TicketDTO,
     TicketEventDTO,
     TicketFilter,
+    TicketStatsDTO,
+    TicketStatsFilter,
+    UpdateDocumentStatus,
     UpdateTicket,
 )
 
@@ -78,6 +84,10 @@ class PaymentResponse(PaymentDTO):
     pass
 
 
+class PaymentQuery(PaymentFilter):
+    pass
+
+
 class DocumentResponse(DocumentDTO):
     pass
 
@@ -86,8 +96,8 @@ class DocumentQuery(DocumentFilter):
     pass
 
 
-class CreateNotificationRequest(CreateNotification):
-    pass
+class CreateNotificationRequest(NotificationContent):
+    user_id: UUID
 
 
 class NotificationResponse(NotificationDTO):
@@ -105,6 +115,26 @@ class NotificationQuery(BaseModel):
 
 
 class DashboardResponse(DashboardDTO):
+    pass
+
+
+class TicketStatsResponse(TicketStatsDTO):
+    pass
+
+
+class TicketStatsQuery(TicketStatsFilter):
+    pass
+
+
+class UpdateDocumentStatusRequest(UpdateDocumentStatus):
+    pass
+
+
+class DocumentStatsResponse(DocumentStatsDTO):
+    pass
+
+
+class BillingSummaryResponse(BillingSummaryDTO):
     pass
 
 

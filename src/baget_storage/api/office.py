@@ -15,26 +15,36 @@ from baget_storage.domain.use_cases.office import (
     CreateTicketUseCase,
     DownloadDocumentUseCase,
     DownloadInvoiceUseCase,
+    GetBillingSummaryUseCase,
     GetDashboardUseCase,
+    GetDocumentStatsUseCase,
     GetDocumentsUseCase,
+    GetDocumentUseCase,
     GetInvoicesUseCase,
+    GetInvoiceUseCase,
     GetNotificationsUseCase,
     GetPaymentsUseCase,
     GetTicketHistoryUseCase,
+    GetTicketStatsUseCase,
     GetTicketsUseCase,
+    GetTicketUseCase,
     MarkNotificationsReadUseCase,
     RecordPaymentUseCase,
+    TakeTicketUseCase,
+    UpdateDocumentStatusUseCase,
     UpdateTicketUseCase,
     UploadDocumentUseCase,
 )
 from baget_storage.schemas.api.office import (
     AttachInvoiceDocumentRequest,
+    BillingSummaryResponse,
     CreateInvoiceRequest,
     CreateNotificationRequest,
     CreateTicketRequest,
     DashboardResponse,
     DocumentQuery,
     DocumentResponse,
+    DocumentStatsResponse,
     DocumentTitle,
     InvoiceQuery,
     InvoiceResponse,
@@ -43,11 +53,15 @@ from baget_storage.schemas.api.office import (
     NotificationQuery,
     NotificationResponse,
     PageResponse,
+    PaymentQuery,
     PaymentResponse,
     RecordPaymentRequest,
     TicketEventResponse,
     TicketQuery,
     TicketResponse,
+    TicketStatsQuery,
+    TicketStatsResponse,
+    UpdateDocumentStatusRequest,
     UpdateTicketRequest,
 )
 from baget_storage.schemas.office import (
@@ -61,12 +75,73 @@ from baget_storage.schemas.office import (
     InvoiceFilter,
     ListFilter,
     NotificationFilter,
+    PaymentFilter,
     RecordPayment,
     TicketFilter,
+    UpdateDocumentStatus,
     UpdateTicket,
 )
 
 router = APIRouter(route_class=DishkaRoute)
+
+
+@router.get("/tickets/stats", response_model=TicketStatsResponse, tags=["Tickets"])
+async def ticket_stats(
+    actor: CurrentActor,
+    filters: Annotated[TicketStatsQuery, Query()],
+    use_case: FromDishka[GetTicketStatsUseCase],
+) -> TicketStatsResponse:
+    return TicketStatsResponse(**(await use_case.execute(actor, filters.period)).model_dump())
+
+
+@router.get("/documents/stats", response_model=DocumentStatsResponse, tags=["Documents"])
+async def document_stats(
+    actor: CurrentActor, use_case: FromDishka[GetDocumentStatsUseCase]
+) -> DocumentStatsResponse:
+    return DocumentStatsResponse(**(await use_case.execute(actor)).model_dump())
+
+
+@router.get("/billing/summary", response_model=BillingSummaryResponse, tags=["Billing"])
+async def billing_summary(
+    actor: CurrentActor, use_case: FromDishka[GetBillingSummaryUseCase]
+) -> BillingSummaryResponse:
+    return BillingSummaryResponse(**(await use_case.execute(actor)).model_dump())
+
+
+@router.get("/tickets/{ticket_id}", response_model=TicketResponse, tags=["Tickets"])
+async def get_ticket(
+    ticket_id: UUID, actor: CurrentActor, use_case: FromDishka[GetTicketUseCase]
+) -> TicketResponse:
+    return TicketResponse(**(await use_case.execute(actor, ticket_id)).model_dump())
+
+
+@router.get("/documents/{document_id}", response_model=DocumentResponse, tags=["Documents"])
+async def get_document(
+    document_id: UUID, actor: CurrentActor, use_case: FromDishka[GetDocumentUseCase]
+) -> DocumentResponse:
+    return DocumentResponse(**(await use_case.execute(actor, document_id)).model_dump())
+
+
+@router.get("/invoices/{invoice_id}", response_model=InvoiceResponse, tags=["Billing"])
+async def get_invoice(
+    invoice_id: UUID, actor: CurrentActor, use_case: FromDishka[GetInvoiceUseCase]
+) -> InvoiceResponse:
+    return InvoiceResponse(**(await use_case.execute(actor, invoice_id)).model_dump())
+
+
+@router.patch(
+    "/documents/{document_id}/status", response_model=DocumentResponse, tags=["Documents"]
+)
+async def update_document_status(
+    document_id: UUID,
+    request: UpdateDocumentStatusRequest,
+    actor: CurrentActor,
+    use_case: FromDishka[UpdateDocumentStatusUseCase],
+) -> DocumentResponse:
+    result = await use_case.execute(
+        actor, document_id, UpdateDocumentStatus(**request.model_dump())
+    )
+    return DocumentResponse(**result.model_dump())
 
 
 def pdf_response(document: DocumentDownload) -> Response:
@@ -113,6 +188,13 @@ async def update_ticket(
         actor, ticket_id, UpdateTicket(**request.model_dump(exclude_unset=True))
     )
     return TicketResponse(**result.model_dump())
+
+
+@router.post("/tickets/{ticket_id}/take", response_model=TicketResponse, tags=["Tickets"])
+async def take_ticket(
+    ticket_id: UUID, actor: CurrentActor, use_case: FromDishka[TakeTicketUseCase]
+) -> TicketResponse:
+    return TicketResponse(**(await use_case.execute(actor, ticket_id)).model_dump())
 
 
 @router.get(
@@ -191,11 +273,11 @@ async def record_payment(
 
 @router.get("/payments", response_model=PageResponse[PaymentResponse], tags=["Billing"])
 async def list_payments(
-    filters: Annotated[ListQuery, Query()],
+    filters: Annotated[PaymentQuery, Query()],
     actor: CurrentActor,
     use_case: FromDishka[GetPaymentsUseCase],
 ) -> PageResponse[PaymentResponse]:
-    result = await use_case.execute(actor, ListFilter(**filters.model_dump()))
+    result = await use_case.execute(actor, PaymentFilter(**filters.model_dump()))
     return PageResponse[PaymentResponse](**result.model_dump())
 
 

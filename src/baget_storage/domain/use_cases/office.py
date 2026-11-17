@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import PurePosixPath
 from uuid import UUID
 
@@ -8,12 +8,19 @@ from baget_storage.core.exceptions import (
     Conflict,
     EntityNotFound,
 )
-from baget_storage.domain.entities.office import DocumentKind, NotificationCategory, TicketStatus
+from baget_storage.domain.entities.office import (
+    DocumentKind,
+    NotificationCategory,
+    NotificationResource,
+    TicketStatus,
+    validate_document_status,
+)
 from baget_storage.domain.entities.user import Actor, Role
 from baget_storage.domain.ports.office import OfficeUnitOfWork
-from baget_storage.domain.use_cases.notifications import notify_user
+from baget_storage.domain.use_cases.notifications import notify_managers, notify_user
 from baget_storage.schemas.office import (
     AttachInvoiceDocument,
+    BillingSummaryDTO,
     CreateDocument,
     CreateInvoice,
     CreateNotification,
@@ -23,6 +30,7 @@ from baget_storage.schemas.office import (
     DocumentDTO,
     DocumentFilter,
     DocumentInsert,
+    DocumentStatsDTO,
     InvoiceDTO,
     InvoiceFilter,
     ListFilter,
@@ -30,12 +38,15 @@ from baget_storage.schemas.office import (
     NotificationFilter,
     Page,
     PaymentDTO,
+    PaymentFilter,
     PaymentInsert,
     RecordPayment,
     TicketDTO,
     TicketEventDTO,
     TicketFilter,
     TicketInsert,
+    TicketStatsDTO,
+    UpdateDocumentStatus,
     UpdateTicket,
 )
 
@@ -87,6 +98,15 @@ class CreateTicketUseCase(OfficeUseCase):
                 TicketInsert(**data.model_dump(), created_by=actor.id)
             )
             await uow.tickets.add_event(ticket.id, actor.id, "Ticket created")
+            await notify_managers(
+                uow.notifications,
+                title="Новая заявка",
+                body=ticket.title,
+                category=NotificationCategory.TICKETS,
+                resource_type=NotificationResource.TICKET,
+                resource_id=ticket.id,
+                event_key=f"ticket-created:{ticket.id}",
+            )
             await uow.commit()
             return ticket
 
@@ -127,7 +147,48 @@ class UpdateTicketUseCase(OfficeUseCase):
             await uow.tickets.add_event(ticket_id, actor.id, description)
             await notify_user(
                 uow.notifications,
-                CreateNotification(user_id=ticket.created_by, title=ticket.title, body=description),
+                CreateNotification(
+                    user_id=ticket.created_by,
+                    title=ticket.title,
+                    body=description,
+                    category=NotificationCategory.TICKETS,
+                    resource_type=NotificationResource.TICKET,
+                    resource_id=ticket.id,
+                ),
+            )
+            await uow.commit()
+            return updated
+
+
+class TakeTicketUseCase(OfficeUseCase):
+    async def execute(self, actor: Actor, ticket_id: UUID) -> TicketDTO:
+        require_manager(actor)
+        async with self._uow as uow:
+            ticket = await uow.tickets.lock(ticket_id)
+            if ticket is None:
+                raise EntityNotFound("Ticket not found")
+            if ticket.status != TicketStatus.NEW:
+                raise Conflict("Only new tickets can be taken into work")
+            assignee = await uow.access.user_name(actor.id)
+            if assignee is None:
+                raise EntityNotFound("Manager not found")
+            updated = await uow.tickets.update(
+                ticket_id, UpdateTicket(status=TicketStatus.IN_PROGRESS, assignee=assignee)
+            )
+            if updated is None:
+                raise EntityNotFound("Ticket not found")
+            description = f"Status: {updated.status}; assignee: {assignee}"
+            await uow.tickets.add_event(ticket_id, actor.id, description)
+            await notify_user(
+                uow.notifications,
+                CreateNotification(
+                    user_id=ticket.created_by,
+                    title=ticket.title,
+                    body=description,
+                    category=NotificationCategory.TICKETS,
+                    resource_type=NotificationResource.TICKET,
+                    resource_id=ticket.id,
+                ),
             )
             await uow.commit()
             return updated
@@ -148,6 +209,8 @@ class CreateInvoiceUseCase(OfficeUseCase):
                     title=f"Счёт {invoice.number}",
                     body=f"К оплате {invoice.amount} RUB до {invoice.due_date}",
                     category=NotificationCategory.PAYMENTS,
+                    resource_type=NotificationResource.INVOICE,
+                    resource_id=invoice.id,
                 ),
             )
             await uow.commit()
@@ -221,6 +284,8 @@ class RecordPaymentUseCase(OfficeUseCase):
                     title="Оплата получена",
                     body=f"По счёту {invoice.number} получено {payment.amount} RUB",
                     category=NotificationCategory.PAYMENTS,
+                    resource_type=NotificationResource.INVOICE,
+                    resource_id=invoice.id,
                 ),
             )
             await uow.commit()
@@ -228,7 +293,7 @@ class RecordPaymentUseCase(OfficeUseCase):
 
 
 class GetPaymentsUseCase(OfficeUseCase):
-    async def execute(self, actor: Actor, filters: ListFilter) -> Page[PaymentDTO]:
+    async def execute(self, actor: Actor, filters: PaymentFilter) -> Page[PaymentDTO]:
         async with self._uow as uow:
             return await uow.billing.list_payments(filters, tenant_scope(actor))
 
@@ -238,6 +303,7 @@ class UploadDocumentUseCase(OfficeUseCase):
         self, actor: Actor, data: CreateDocument, filename: str, content: bytes
     ) -> DocumentDTO:
         require_manager(actor)
+        validate_document_status(data.kind, data.status)
         if not content or len(content) > 10 * 1024 * 1024:
             raise BusinessRuleViolation("PDF size must be between 1 byte and 10 MiB")
         if not content.startswith(b"%PDF-"):
@@ -257,6 +323,8 @@ class UploadDocumentUseCase(OfficeUseCase):
                     title="Новый документ",
                     body=document.title,
                     category=NotificationCategory.DOCUMENTS,
+                    resource_type=NotificationResource.DOCUMENT,
+                    resource_id=document.id,
                 ),
             )
             await uow.commit()
@@ -301,9 +369,13 @@ class CreateNotificationUseCase(OfficeUseCase):
         async with self._uow as uow:
             if not await uow.access.user_exists(data.user_id):
                 raise EntityNotFound("User not found")
+            if data.resource_type is not None and data.resource_id is not None:
+                allowed = await uow.notifications.can_access_resource(
+                    data.user_id, data.resource_type, data.resource_id
+                )
+                if not allowed:
+                    raise AccessDenied("The recipient cannot access this notification resource.")
             notification = await notify_user(uow.notifications, data)
-            if notification is None:
-                raise BusinessRuleViolation("The user has disabled this notification category.")
             await uow.commit()
             return notification
 
@@ -312,3 +384,81 @@ class GetDashboardUseCase(OfficeUseCase):
     async def execute(self, actor: Actor) -> DashboardDTO:
         async with self._uow as uow:
             return await uow.dashboard.get(tenant_scope(actor), actor.id)
+
+
+class GetTicketUseCase(OfficeUseCase):
+    async def execute(self, actor: Actor, ticket_id: UUID) -> TicketDTO:
+        async with self._uow as uow:
+            ticket = await uow.tickets.get_by_id(ticket_id)
+            if ticket is None or (actor.role == Role.TENANT and ticket.created_by != actor.id):
+                raise EntityNotFound("Ticket not found")
+            return ticket
+
+
+class GetTicketStatsUseCase(OfficeUseCase):
+    async def execute(self, actor: Actor, period: date | None = None) -> TicketStatsDTO:
+        if period is not None and period.day != 1:
+            raise BusinessRuleViolation("The ticket period must be the first day of a month.")
+        async with self._uow as uow:
+            return await uow.tickets.stats(tenant_scope(actor), period)
+
+
+class GetDocumentStatsUseCase(OfficeUseCase):
+    async def execute(self, actor: Actor) -> DocumentStatsDTO:
+        async with self._uow as uow:
+            return await uow.documents.stats(tenant_scope(actor))
+
+
+class GetBillingSummaryUseCase(OfficeUseCase):
+    async def execute(self, actor: Actor) -> BillingSummaryDTO:
+        async with self._uow as uow:
+            return await uow.billing.summary(tenant_scope(actor))
+
+
+class GetDocumentUseCase(OfficeUseCase):
+    async def execute(self, actor: Actor, document_id: UUID) -> DocumentDTO:
+        async with self._uow as uow:
+            document = await uow.documents.get_by_id(document_id)
+            if document is None:
+                raise EntityNotFound("Document not found")
+            await require_lease_access(uow, actor, document.lease_id)
+            return document
+
+
+class GetInvoiceUseCase(OfficeUseCase):
+    async def execute(self, actor: Actor, invoice_id: UUID) -> InvoiceDTO:
+        async with self._uow as uow:
+            invoice = await uow.billing.get_invoice(invoice_id)
+            if invoice is None:
+                raise EntityNotFound("Invoice not found")
+            await require_lease_access(uow, actor, invoice.lease_id)
+            return invoice
+
+
+class UpdateDocumentStatusUseCase(OfficeUseCase):
+    async def execute(
+        self, actor: Actor, document_id: UUID, data: UpdateDocumentStatus
+    ) -> DocumentDTO:
+        require_manager(actor)
+        async with self._uow as uow:
+            document = await uow.documents.get_by_id(document_id, lock=True)
+            if document is None:
+                raise EntityNotFound("Document not found")
+            validate_document_status(document.kind, data.status)
+            if document.status == data.status:
+                return document
+            owner = await require_lease_access(uow, actor, document.lease_id)
+            updated = await uow.documents.update_status(document_id, data.status)
+            await notify_user(
+                uow.notifications,
+                CreateNotification(
+                    user_id=owner,
+                    title="Статус документа изменён",
+                    body=f"{updated.title}: {updated.status}",
+                    category=NotificationCategory.DOCUMENTS,
+                    resource_type=NotificationResource.DOCUMENT,
+                    resource_id=document_id,
+                ),
+            )
+            await uow.commit()
+            return updated

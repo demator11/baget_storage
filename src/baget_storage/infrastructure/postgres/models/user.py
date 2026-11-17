@@ -1,4 +1,6 @@
-from sqlalchemy import Boolean, CheckConstraint, Integer, String, text
+from datetime import datetime
+
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from baget_storage.infrastructure.postgres.base import Base
@@ -25,5 +27,8 @@ class UserOrm(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     notify_payments: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     notify_meters: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     notify_documents: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    notify_tickets: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    notify_leases: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     token_version: Mapped[int] = mapped_column(Integer, server_default=text("0"))

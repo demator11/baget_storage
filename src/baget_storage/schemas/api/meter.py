@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -25,7 +25,7 @@ class MeterQuery(BaseModel):
     room_id: UUID | None = None
     kind: MeterKind | None = None
     period: date | None = None
-    status: ReadingStatus | None = None
+    status: ReadingStatus | Literal["missing"] | None = None
     limit: int = Field(default=25, ge=1, le=100)
     offset: int = Field(default=0, ge=0)
 
@@ -45,6 +45,12 @@ class MeterResponse(BaseModel):
     latest_reading_status: ReadingStatus | None
     created_at: datetime
     updated_at: datetime
+    latest_reading_at: datetime | None = None
+    latest_reading_has_photo: bool = False
+    previous_accepted_value: Decimal | None = None
+    room_name: str | None = None
+    building: str | None = None
+    floor: int | None = None
 
 
 class MeterPageResponse(BaseModel):
@@ -80,6 +86,9 @@ class CorrectReadingRequest(BaseModel):
 class ReadingQuery(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    meter_id: UUID | None = None
+    room_id: UUID | None = None
+    kind: MeterKind | None = None
     status: ReadingStatus | None = None
     period: date | None = None
     limit: int = Field(default=25, ge=1, le=100)
@@ -103,12 +112,55 @@ class ReadingResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     correction_reason: str | None = None
+    has_photo: bool = False
+    room_id: UUID | None = None
+    room_name: str | None = None
+    kind: MeterKind | None = None
+    serial_number: str | None = None
+    unit: str | None = None
+    submitted_by_name: str | None = None
 
 
 class ReadingPageResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     items: list[ReadingResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class MeterStatsResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    period: date
+    total: int
+    pending: int
+    accepted: int
+    rejected: int
+    missing: int
+
+
+class ReadingPeriodResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    period: date
+    opens_on: date
+    closes_on: date
+    is_open: bool
+
+
+class ReadingPeriodQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    limit: int = Field(default=24, ge=1, le=100)
+    offset: int = Field(default=0, ge=0)
+
+
+class ReadingPeriodPageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    items: list[ReadingPeriodResponse]
     total: int
     limit: int
     offset: int

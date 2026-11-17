@@ -1,6 +1,6 @@
 from baget_storage.core.exceptions import Conflict, EntityNotFound
 from baget_storage.domain.entities.user import Role, validate_password, validate_profile
-from baget_storage.domain.ports.auth import AuthUnitOfWork, PasswordHasher
+from baget_storage.domain.ports.auth import AuthClock, AuthUnitOfWork, PasswordHasher
 from baget_storage.schemas.bootstrap import ResetPassword
 from baget_storage.schemas.user import CreateUser, StoreUser, UserDTO
 
@@ -33,9 +33,10 @@ class CreateManagerUseCase:
 
 
 class ResetPasswordUseCase:
-    def __init__(self, uow: AuthUnitOfWork, passwords: PasswordHasher) -> None:
+    def __init__(self, uow: AuthUnitOfWork, passwords: PasswordHasher, clock: AuthClock) -> None:
         self._uow = uow
         self._passwords = passwords
+        self._clock = clock
 
     async def execute(self, data: ResetPassword) -> None:
         validate_password(data.password)
@@ -46,4 +47,6 @@ class ResetPasswordUseCase:
                 raise EntityNotFound("User not found")
             if not await uow.users.change_password(user.id, hashed, user.token_version):
                 raise Conflict("Account changed; retry password reset")
+            await uow.sessions.revoke_all(user.id)
+            await uow.actions.invalidate(user.id, "password_reset", self._clock.now())
             await uow.commit()

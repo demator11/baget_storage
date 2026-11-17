@@ -6,16 +6,19 @@ from uuid import UUID
 from baget_storage.schemas.rental import (
     CreateLease,
     CreateRoom,
+    ExpiringLeaseFilter,
     LeaseDTO,
     LeaseFilter,
     RentalPage,
     RoomDTO,
     RoomFilter,
+    RoomStatsDTO,
     UpdateRoom,
 )
 
 
 class RoomRepository(Protocol):
+    async def stats(self, tenant_id: UUID | None) -> RoomStatsDTO: ...
     async def create(self, data: CreateRoom) -> RoomDTO: ...
 
     async def get_by_id(self, entity_id: UUID) -> RoomDTO | None: ...
@@ -34,6 +37,9 @@ class RoomRepository(Protocol):
 
 
 class LeaseRepository(Protocol):
+    async def expiring(
+        self, filters: ExpiringLeaseFilter, tenant_id: UUID | None
+    ) -> RentalPage[LeaseDTO]: ...
     async def create(self, data: CreateLease) -> LeaseDTO: ...
 
     async def get_by_id(self, entity_id: UUID) -> LeaseDTO | None: ...

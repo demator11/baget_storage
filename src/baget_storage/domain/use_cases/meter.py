@@ -6,11 +6,17 @@ from baget_storage.core.exceptions import (
     Conflict,
     EntityNotFound,
 )
-from baget_storage.domain.entities.meter import ReadingStatus, validate_reading, validate_review
-from baget_storage.domain.entities.office import NotificationCategory
+from baget_storage.domain.entities.meter import (
+    ReadingStatus,
+    validate_reading,
+    validate_reading_period,
+    validate_review,
+)
+from baget_storage.domain.entities.office import NotificationCategory, NotificationResource
+from baget_storage.domain.entities.reading_period import ReadingPeriodPolicy
 from baget_storage.domain.entities.user import Actor, Role
 from baget_storage.domain.ports.meter import MeterClock, MeterUnitOfWork
-from baget_storage.domain.use_cases.notifications import notify_user
+from baget_storage.domain.use_cases.notifications import notify_managers, notify_user
 from baget_storage.schemas.meter import (
     CorrectReading,
     CreateMeter,
@@ -18,13 +24,18 @@ from baget_storage.schemas.meter import (
     MeterDTO,
     MeterFilters,
     MeterPage,
+    MeterStatsDTO,
     ReadingDTO,
     ReadingFilters,
     ReadingPage,
+    ReadingPeriodFilter,
+    ReadingPeriodPage,
     ReviewReading,
     SubmitReading,
 )
 from baget_storage.schemas.office import CreateNotification
+
+DEFAULT_READING_POLICY = ReadingPeriodPolicy()
 
 
 class CreateMeterUseCase:
@@ -50,6 +61,7 @@ class GetMetersUseCase:
         self._clock = clock
 
     async def execute(self, actor: Actor, filters: MeterFilters) -> MeterPage:
+        validate_reading_period(filters.period)
         tenant_id = None if actor.role is Role.MANAGER else actor.id
         async with self._uow:
             return await self._uow.meters.list_meters(filters, tenant_id, self._clock.today())
@@ -61,6 +73,7 @@ class GetReadingsUseCase:
         self._clock = clock
 
     async def execute(self, actor: Actor, meter_id: UUID, filters: ReadingFilters) -> ReadingPage:
+        validate_reading_period(filters.period)
         async with self._uow:
             meter = await self._uow.meters.get_by_id(meter_id)
             if meter is None:
@@ -74,9 +87,15 @@ class GetReadingsUseCase:
 
 
 class SubmitReadingUseCase:
-    def __init__(self, uow: MeterUnitOfWork, clock: MeterClock) -> None:
+    def __init__(
+        self,
+        uow: MeterUnitOfWork,
+        clock: MeterClock,
+        policy: ReadingPeriodPolicy = DEFAULT_READING_POLICY,
+    ) -> None:
         self._uow = uow
         self._clock = clock
+        self._policy = policy
 
     async def execute(self, actor: Actor, meter_id: UUID, data: SubmitReading) -> ReadingDTO:
         if actor.role is not Role.TENANT:
@@ -105,6 +124,8 @@ class SubmitReadingUseCase:
                 elif latest.status is not ReadingStatus.ACCEPTED:
                     raise Conflict("The previous reading must be accepted first.")
             validate_reading(data.period, data.value, previous, today)
+            if not resubmitting and not self._policy.window(data.period, today).is_open:
+                raise BusinessRuleViolation("The submission window for this period is closed.")
             if resubmitting and latest is not None:
                 result = await self._uow.meters.resubmit_reading(latest.id, data.value)
             else:
@@ -117,8 +138,94 @@ class SubmitReadingUseCase:
                         previous_value=previous,
                     )
                 )
+            await notify_managers(
+                self._uow.notifications,
+                title="Новые показания счётчика",
+                body=f"Переданы показания прибора {meter.serial_number} за {data.period:%m.%Y}.",
+                category=NotificationCategory.METERS,
+                resource_type=NotificationResource.READING,
+                resource_id=result.id,
+                event_key=f"reading-submitted:{result.id}:{result.updated_at.isoformat()}",
+            )
             await self._uow.commit()
             return result
+
+
+class GetReadingJournalUseCase:
+    def __init__(self, uow: MeterUnitOfWork) -> None:
+        self._uow = uow
+
+    async def execute(self, actor: Actor, filters: ReadingFilters) -> ReadingPage:
+        validate_reading_period(filters.period)
+        tenant_id = None if actor.role is Role.MANAGER else actor.id
+        async with self._uow:
+            return await self._uow.meters.list_readings(None, filters, tenant_id)
+
+
+class GetReadingUseCase:
+    def __init__(self, uow: MeterUnitOfWork) -> None:
+        self._uow = uow
+
+    async def execute(self, actor: Actor, reading_id: UUID) -> ReadingDTO:
+        async with self._uow:
+            reading = await self._uow.meters.get_reading(reading_id)
+            if reading is None:
+                raise EntityNotFound("Reading was not found.")
+            if actor.role is not Role.MANAGER and reading.submitted_by != actor.id:
+                raise AccessDenied()
+            return reading
+
+
+class GetMeterUseCase:
+    def __init__(self, uow: MeterUnitOfWork, clock: MeterClock) -> None:
+        self._uow = uow
+        self._clock = clock
+
+    async def execute(self, actor: Actor, meter_id: UUID) -> MeterDTO:
+        async with self._uow:
+            meter = await self._uow.meters.get_by_id(meter_id)
+            if meter is None:
+                raise EntityNotFound("Meter was not found.")
+            if actor.role is not Role.MANAGER and not await self._uow.meters.tenant_has_access(
+                meter.room_id, actor.id, self._clock.today()
+            ):
+                raise AccessDenied()
+            return meter
+
+
+class GetMeterStatsUseCase:
+    def __init__(self, uow: MeterUnitOfWork, clock: MeterClock) -> None:
+        self._uow = uow
+        self._clock = clock
+
+    async def execute(self, actor: Actor, filters: MeterFilters) -> MeterStatsDTO:
+        validate_reading_period(filters.period)
+        tenant_id = None if actor.role is Role.MANAGER else actor.id
+        async with self._uow:
+            return await self._uow.meters.stats(filters, tenant_id, self._clock.today())
+
+
+class GetReadingPeriodsUseCase:
+    def __init__(
+        self, uow: MeterUnitOfWork, clock: MeterClock, policy: ReadingPeriodPolicy
+    ) -> None:
+        self._uow = uow
+        self._clock = clock
+        self._policy = policy
+
+    async def execute(self, actor: Actor, filters: ReadingPeriodFilter) -> ReadingPeriodPage:
+        tenant_id = None if actor.role is Role.MANAGER else actor.id
+        today = self._clock.today()
+        async with self._uow:
+            periods, total = await self._uow.meters.periods(
+                tenant_id, today, filters.limit, filters.offset
+            )
+            return ReadingPeriodPage(
+                items=[self._policy.window(period, today) for period in periods],
+                total=total,
+                limit=filters.limit,
+                offset=filters.offset,
+            )
 
 
 class ReviewReadingUseCase:
@@ -150,6 +257,8 @@ class ReviewReadingUseCase:
                     title="Показания проверены",
                     body=body,
                     category=NotificationCategory.METERS,
+                    resource_type=NotificationResource.READING,
+                    resource_id=reading.id,
                 ),
             )
             await self._uow.commit()
@@ -192,6 +301,8 @@ class CorrectReadingUseCase:
                         f"на {result.value} и приняты. Причина: {data.reason.strip()}"
                     ),
                     category=NotificationCategory.METERS,
+                    resource_type=NotificationResource.READING,
+                    resource_id=latest.id,
                 ),
             )
             await self._uow.commit()

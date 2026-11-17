@@ -19,8 +19,8 @@ from baget_storage.schemas.office import (
     CreateInvoice,
     CreateNotification,
     DocumentInsert,
-    ListFilter,
     NotificationFilter,
+    PaymentFilter,
     RecordPayment,
 )
 
@@ -136,7 +136,7 @@ async def test_concurrent_duplicate_payment_is_idempotent(
     async with OfficeSqlAlchemyUnitOfWork(session_factory) as uow:
         updated = await uow.billing.get_invoice(invoice.id)
         assert updated is not None and updated.status == "paid"
-        assert (await uow.billing.list_payments(ListFilter(), None)).total == 1
+        assert (await uow.billing.list_payments(PaymentFilter(), None)).total == 1
         owner = await uow.access.lease_owner(command.lease_id)
         assert owner is not None
         assert (await uow.notifications.list(owner, NotificationFilter())).total == 1

@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from baget_storage.domain.entities.rental import LeaseStatus, RoomStatus
+from baget_storage.schemas.references import LeaseRef, RoomRef, TenantRef
 
 type Money = Annotated[Decimal, Field(ge=0, max_digits=12, decimal_places=2)]
 type Area = Annotated[Decimal, Field(gt=0, max_digits=10, decimal_places=2)]
@@ -49,15 +50,21 @@ class UpdateRoom(RentalDTO):
         return self
 
 
+class ActiveLeaseDTO(LeaseRef):
+    tenant: TenantRef
+
+
 class RoomDTO(CreateRoom):
     id: UUID
     created_at: datetime
     updated_at: datetime
+    active_lease: ActiveLeaseDTO | None = None
 
 
 class RoomFilter(RentalDTO):
     search: Annotated[str, Field(max_length=160)] | None = None
     status: RoomStatus | None = None
+    building: Name | None = None
     limit: int = Field(default=20, ge=1, le=100)
     offset: int = Field(default=0, ge=0)
 
@@ -76,6 +83,8 @@ class LeaseDTO(CreateLease):
     status: LeaseStatus
     created_at: datetime
     updated_at: datetime
+    room: RoomRef | None = None
+    tenant: TenantRef | None = None
 
 
 class LeaseFilter(RentalDTO):
@@ -84,6 +93,23 @@ class LeaseFilter(RentalDTO):
     status: LeaseStatus | None = None
     limit: int = Field(default=20, ge=1, le=100)
     offset: int = Field(default=0, ge=0)
+
+
+class ExpiringLeaseFilter(RentalDTO):
+    within_days: int = Field(default=30, ge=0, le=366)
+    limit: int = Field(default=20, ge=1, le=100)
+    offset: int = Field(default=0, ge=0)
+
+
+class RoomStatsDTO(RentalDTO):
+    total: int
+    occupied: int
+    available: int
+    maintenance: int
+    total_area_m2: Decimal
+    occupied_area_m2: Decimal
+    available_area_m2: Decimal
+    maintenance_area_m2: Decimal
 
 
 class RentalPage[T](RentalDTO):

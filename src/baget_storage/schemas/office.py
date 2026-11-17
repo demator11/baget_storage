@@ -9,8 +9,11 @@ from baget_storage.domain.entities.office import (
     DocumentKind,
     DocumentStatus,
     NotificationCategory,
+    NotificationResource,
     TicketStatus,
 )
+from baget_storage.schemas.references import InvoiceRef, LeaseRef, RoomRef, TenantRef, UserRef
+from baget_storage.schemas.rental import RoomStatsDTO
 
 
 class DTO(BaseModel):
@@ -33,6 +36,23 @@ class ListFilter(DTO):
 
 class TicketFilter(ListFilter):
     status: TicketStatus | None = None
+    period: date | None = None
+
+    @model_validator(mode="after")
+    def validate_period(self) -> "TicketFilter":
+        if self.period is not None and self.period.day != 1:
+            raise ValueError("period must be the first day of a month")
+        return self
+
+
+class TicketStatsFilter(DTO):
+    period: date | None = None
+
+    @model_validator(mode="after")
+    def validate_period(self) -> "TicketStatsFilter":
+        if self.period is not None and self.period.day != 1:
+            raise ValueError("period must be the first day of a month")
+        return self
 
 
 class CreateTicket(DTO):
@@ -64,6 +84,11 @@ class TicketDTO(TicketInsert):
     assignee: str | None
     created_at: datetime
     updated_at: datetime
+    public_number: int | None = None
+    number: str | None = None
+    room: RoomRef | None = None
+    creator: UserRef | None = None
+    tenant: TenantRef | None = None
 
 
 class TicketEventDTO(DTO):
@@ -72,6 +97,7 @@ class TicketEventDTO(DTO):
     actor_id: UUID
     description: str
     created_at: datetime
+    actor: UserRef | None = None
 
 
 class CreateInvoice(DTO):
@@ -96,10 +122,27 @@ class InvoiceDTO(CreateInvoice):
     status: Literal["pending", "overdue", "paid"]
     created_at: datetime
     updated_at: datetime
+    lease: LeaseRef | None = None
+    room: RoomRef | None = None
+    tenant: TenantRef | None = None
 
 
 class InvoiceFilter(ListFilter):
     status: Literal["pending", "overdue", "paid"] | None = None
+    issued_from: date | None = None
+    issued_to: date | None = None
+    due_from: date | None = None
+    due_to: date | None = None
+    period: date | None = None
+
+    @model_validator(mode="after")
+    def validate_ranges(self) -> "InvoiceFilter":
+        for start, end in ((self.issued_from, self.issued_to), (self.due_from, self.due_to)):
+            if start is not None and end is not None and start > end:
+                raise ValueError("The start date cannot be after the end date")
+        if self.period is not None and self.period.day != 1:
+            raise ValueError("period must be the first day of a month")
+        return self
 
 
 class AttachInvoiceDocument(DTO):
@@ -119,6 +162,28 @@ class PaymentInsert(RecordPayment):
 class PaymentDTO(PaymentInsert):
     id: UUID
     created_at: datetime
+    invoice: InvoiceRef | None = None
+    lease: LeaseRef | None = None
+    room: RoomRef | None = None
+    tenant: TenantRef | None = None
+
+
+class PaymentFilter(ListFilter):
+    paid_from: date | None = None
+    paid_to: date | None = None
+    period: date | None = None
+
+    @model_validator(mode="after")
+    def validate_ranges(self) -> "PaymentFilter":
+        if (
+            self.paid_from is not None
+            and self.paid_to is not None
+            and self.paid_from > self.paid_to
+        ):
+            raise ValueError("paid_from cannot be after paid_to")
+        if self.period is not None and self.period.day != 1:
+            raise ValueError("period must be the first day of a month")
+        return self
 
 
 class CreateDocument(DTO):
@@ -140,6 +205,9 @@ class DocumentDTO(CreateDocument):
     size_bytes: int
     created_at: datetime
     updated_at: datetime
+    lease: LeaseRef | None = None
+    room: RoomRef | None = None
+    tenant: TenantRef | None = None
 
 
 class DocumentDownload(DTO):
@@ -149,19 +217,71 @@ class DocumentDownload(DTO):
 
 class DocumentFilter(ListFilter):
     kind: DocumentKind | None = None
+    status: DocumentStatus | None = None
 
 
-class CreateNotification(DTO):
-    user_id: UUID
+class UpdateDocumentStatus(DTO):
+    status: DocumentStatus
+
+
+class TicketStatsDTO(DTO):
+    total: int
+    new: int
+    in_progress: int
+    closed: int
+    period: date | None = None
+
+
+class DocumentStatsDTO(DTO):
+    total: int
+    contracts: int
+    invoices: int
+    acts: int
+    available: int
+    active: int
+    signed: int
+
+
+class BillingSummaryDTO(DTO):
+    next_unpaid_invoice: InvoiceDTO | None
+    due_count: int
+    overdue_count: int
+    unpaid_amount: Decimal
+    paid_current_month: Decimal
+    last_payment: PaymentDTO | None
+
+
+class NotificationContent(DTO):
     title: str = Field(min_length=1, max_length=200)
     body: str = Field(min_length=1, max_length=2000)
     category: NotificationCategory = NotificationCategory.SYSTEM
+    resource_type: NotificationResource | None = None
+    resource_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def require_resource_pair(self) -> "NotificationContent":
+        if (self.resource_type is None) != (self.resource_id is None):
+            raise ValueError("resource_type and resource_id must be supplied together")
+        return self
 
 
-class NotificationDTO(CreateNotification):
+class CreateNotification(NotificationContent):
+    user_id: UUID
+    deduplication_key: str | None = Field(default=None, max_length=200, exclude=True)
+
+
+class NotificationDTO(NotificationContent):
+    user_id: UUID
     id: UUID
     read_at: datetime | None
     created_at: datetime
+
+
+class NotificationCountsDTO(DTO):
+    total: int
+    unread: int
+    categories: dict[NotificationCategory, int]
+    unread_by_category: dict[NotificationCategory, int]
 
 
 class NotificationFilter(ListFilter):
@@ -177,3 +297,5 @@ class DashboardDTO(DTO):
     next_lease_end: date | None
     unread_notifications: int
     open_tickets: int
+    next_payment: InvoiceDTO | None = None
+    room_metrics: RoomStatsDTO | None = None

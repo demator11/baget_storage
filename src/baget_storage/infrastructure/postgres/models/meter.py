@@ -7,6 +7,8 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Integer,
+    LargeBinary,
     Numeric,
     String,
     UniqueConstraint,
@@ -44,6 +46,12 @@ class MeterReadingOrm(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint("previous_value >= 0 AND value >= previous_value", name="value_valid"),
         CheckConstraint("EXTRACT(DAY FROM period) = 1", name="period_month_start"),
         CheckConstraint(
+            "(photo_content IS NULL AND photo_size IS NULL) OR "
+            "(photo_content IS NOT NULL AND photo_size = octet_length(photo_content) "
+            "AND photo_size > 0 AND photo_size <= 8388608)",
+            name="photo_consistent",
+        ),
+        CheckConstraint(
             "(status = 'pending' AND reviewed_by IS NULL AND reviewed_at IS NULL "
             "AND rejection_reason IS NULL) OR "
             "(status = 'accepted' AND reviewed_by IS NOT NULL AND reviewed_at IS NOT NULL "
@@ -71,6 +79,12 @@ class MeterReadingOrm(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     correction_reason: Mapped[str | None] = mapped_column(String(1000))
     reviewed_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    photo_content: Mapped[bytes | None] = mapped_column(LargeBinary, deferred=True)
+    photo_size: Mapped[int | None] = mapped_column(Integer)
+
+    @property
+    def has_photo(self) -> bool:
+        return self.photo_size is not None
 
     @property
     def consumption(self) -> Decimal:

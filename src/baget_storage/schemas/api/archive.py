@@ -2,7 +2,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from baget_storage.domain.entities.office import DocumentKind
+from baget_storage.domain.entities.office import DocumentKind, DocumentStatus
 
 
 class ArchiveQuery(BaseModel):
@@ -11,3 +11,4 @@ class ArchiveQuery(BaseModel):
     search: str | None = Field(default=None, max_length=200)
     room_id: UUID | None = None
     kind: DocumentKind | None = None
+    status: DocumentStatus | None = None

@@ -19,6 +19,10 @@ class UserDTO(BaseModel):
     notify_payments: bool = True
     notify_meters: bool = True
     notify_documents: bool = True
+    notify_tickets: bool = True
+    notify_leases: bool = True
+    email_verified_at: datetime | None = None
+    accessible_buildings: list[str] = Field(default_factory=list)
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -54,6 +58,8 @@ class StoreUser(BaseModel):
     notify_payments: bool = True
     notify_meters: bool = True
     notify_documents: bool = True
+    notify_tickets: bool = True
+    notify_leases: bool = True
 
 
 class UpdateProfile(BaseModel):
@@ -64,6 +70,8 @@ class UpdateProfile(BaseModel):
     notify_payments: bool | None = None
     notify_meters: bool | None = None
     notify_documents: bool | None = None
+    notify_tickets: bool | None = None
+    notify_leases: bool | None = None
 
 
 class Login(BaseModel):
@@ -84,6 +92,7 @@ class ChangePassword(BaseModel):
 class TokenClaims(BaseModel):
     user_id: UUID
     token_version: int = Field(ge=0, strict=True)
+    session_id: UUID | None = None
 
 
 class AccessToken(BaseModel):
@@ -97,3 +106,54 @@ class UserPage(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class SessionTokens(AccessToken):
+    refresh_token: str = Field(repr=False)
+    refresh_expires_in: int
+    session_id: UUID
+    user: UserDTO
+
+
+class SessionDTO(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    user_id: UUID
+    token_version: int
+    expires_at: datetime
+    revoked_at: datetime | None
+    last_used_at: datetime
+    created_at: datetime
+
+
+class StoreSession(BaseModel):
+    user_id: UUID
+    token_version: int
+    expires_at: datetime
+
+
+class RefreshTokenDTO(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    session_id: UUID
+    token_hash: str
+    expires_at: datetime
+    consumed_at: datetime | None
+
+
+class EmailActionDTO(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    user_id: UUID
+    purpose: str
+    token_hash: str
+    expires_at: datetime
+    consumed_at: datetime | None
+
+
+class ResetPassword(BaseModel):
+    token: str = Field(min_length=32, max_length=256, repr=False)
+    new_password: str = Field(min_length=12, max_length=128, repr=False)
