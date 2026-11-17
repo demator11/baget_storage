@@ -1,3 +1,27 @@
+x-backend-environment: &backend-environment
+  BAGET_ENVIRONMENT: ${BAGET_ENVIRONMENT:-local}
+  BAGET_DATABASE_URL: postgresql+asyncpg://baget:${BAGET_POSTGRES_PASSWORD}@db:5432/baget_storage
+  BAGET_JWT_SECRET: ${BAGET_JWT_SECRET:?Set BAGET_JWT_SECRET}
+  BAGET_CORS_ORIGINS: ${BAGET_CORS_ORIGINS:-[]}
+  BAGET_ACCESS_TOKEN_MINUTES: ${BAGET_ACCESS_TOKEN_MINUTES:-60}
+  BAGET_FRONTEND_BASE_URL: ${BAGET_FRONTEND_BASE_URL:-http://localhost:3000}
+  BAGET_REFRESH_TOKEN_DAYS: ${BAGET_REFRESH_TOKEN_DAYS:-30}
+  BAGET_EMAIL_VERIFICATION_HOURS: ${BAGET_EMAIL_VERIFICATION_HOURS:-24}
+  BAGET_PASSWORD_RESET_MINUTES: ${BAGET_PASSWORD_RESET_MINUTES:-30}
+  BAGET_READING_OPENING_DAY: ${BAGET_READING_OPENING_DAY:-1}
+  BAGET_READING_DEADLINE_DAY: ${BAGET_READING_DEADLINE_DAY:-5}
+  BAGET_SMTP_HOST: ${BAGET_SMTP_HOST:-mailpit}
+  BAGET_SMTP_PORT: ${BAGET_SMTP_PORT:-1025}
+  BAGET_SMTP_USERNAME: ${BAGET_SMTP_USERNAME:-}
+  BAGET_SMTP_PASSWORD: ${BAGET_SMTP_PASSWORD:-}
+  BAGET_SMTP_FROM_ADDRESS: ${BAGET_SMTP_FROM_ADDRESS:-noreply@skladpro.local}
+  BAGET_SMTP_STARTTLS: ${BAGET_SMTP_STARTTLS:-false}
+  BAGET_SMTP_USE_TLS: ${BAGET_SMTP_USE_TLS:-false}
+  BAGET_SMTP_TIMEOUT_SECONDS: ${BAGET_SMTP_TIMEOUT_SECONDS:-15}
+  BAGET_WORKER_POLL_SECONDS: ${BAGET_WORKER_POLL_SECONDS:-5}
+  BAGET_WORKER_BATCH_SIZE: ${BAGET_WORKER_BATCH_SIZE:-20}
+  BAGET_WORKER_MAX_ATTEMPTS: ${BAGET_WORKER_MAX_ATTEMPTS:-8}
+
 services:
   db:
     image: postgres:17-alpine
@@ -26,16 +50,24 @@ services:
         condition: service_healthy
   api:
     build: .
-    environment:
-      BAGET_ENVIRONMENT: ${BAGET_ENVIRONMENT:-local}
-      BAGET_DATABASE_URL: postgresql+asyncpg://baget:${BAGET_POSTGRES_PASSWORD}@db:5432/baget_storage
-      BAGET_JWT_SECRET: ${BAGET_JWT_SECRET:?Set BAGET_JWT_SECRET}
-      BAGET_CORS_ORIGINS: ${BAGET_CORS_ORIGINS:-[]}
-      BAGET_ACCESS_TOKEN_MINUTES: ${BAGET_ACCESS_TOKEN_MINUTES:-60}
+    environment: *backend-environment
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
       migrate:
         condition: service_completed_successfully
+  worker:
+    build: .
+    environment: *backend-environment
+    command: ["python", "-m", "baget_storage.worker"]
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+  mailpit:
+    image: axllent/mailpit:latest
+    profiles: ["local"]
+    ports:
+      - "127.0.0.1:8025:8025"
 volumes:
   postgres_data:

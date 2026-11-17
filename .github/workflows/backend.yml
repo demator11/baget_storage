@@ -39,5 +39,11 @@ jobs:
       - run: uv run alembic upgrade head
       - run: uv run alembic check
       - run: uv run pytest -q
+      - run: docker build --tag baget-storage:ci .
+      - run: |
+          docker run --detach --name baget-storage-api --network host --env BAGET_ENVIRONMENT --env BAGET_DATABASE_URL --env BAGET_JWT_SECRET baget-storage:ci
+          curl --fail --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:8000/health/ready
+      - if: always()
+        run: docker rm --force baget-storage-api || true
       - run: uv run alembic downgrade base
       - run: uv run alembic upgrade head
